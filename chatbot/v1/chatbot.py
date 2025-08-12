@@ -46,6 +46,8 @@ import time
 
 from threading import Lock
 
+from minescript import echo, BlockPos
+
 try:
   import openai_api_key
 except ImportError:
@@ -59,14 +61,14 @@ except ImportError:
   echo("https://beta.openai.com/account/api-keys")
   sys.exit(1)
 
-from minescript import echo, BlockPos
+
 from typing import Any, List, Set, Dict, Tuple, Optional, Callable
 
 OPENAI_API_URL = "https://api.openai.com/v1/completions"
 OPENAI_API_HEADERS = { "Authorization": f"Bearer {openai_api_key.SECRET_KEY}" }
 
 
-def ask_chatgpt(prompt: str, model: str = "text-davinci-003", max_tokens: int = 150) -> str:
+def ask_chatgpt(prompt: str, model: str = "gpt-4o-mini", max_tokens: int = 150) -> str:
   data = {
     "model": model,
     "prompt": prompt,
@@ -113,12 +115,12 @@ def query(question: str, debug: bool = False) -> str:
     "me: This is tab-delimited tabular data representing Minecraft entity's name, " +
     "type, health, current activity, block they're on, and position:\n")
 
-  world_props = minescript.world_properties()
+  world_props = minescript.world_info()
   entities = minescript.entities(nbt=True)
   my_pos = None
   for e in entities:
-    if "local" in e:
-      my_pos = e["position"]
+    if "local" in vars(e):
+      my_pos = e.position
       break
 
   if not my_pos:
@@ -126,16 +128,16 @@ def query(question: str, debug: bool = False) -> str:
 
   # Assign "dsqr" to each entity: distance squared to local player.
   for e in entities:
-    e["dsqr"] = distance_squared(my_pos, e["position"])
+    e.dsqr = distance_squared(my_pos, e.position)
 
   # Truncate the list of entities at the 50 closest to the local player.
-  entities.sort(key=lambda e: e["dsqr"])
+  entities.sort(key=lambda e: e.dsqr)
   entities = entities[:50]
 
   # Get the block types for the 3 blocks at and immediately below each entity.
   positions: List[BlockPos] = [None] * (3 * len(entities))
   for i, e in enumerate(entities):
-    positions[3 * i] = block_pos(e["position"])
+    positions[3 * i] = block_pos(e.position)
     positions[3 * i + 1] = block_pos_minus_1y(positions[3 * i])
     positions[3 * i + 2] = block_pos_minus_1y(positions[3 * i + 1])
   blocks: List[str] = [simple_block_name(b) for b in minescript.getblocklist(positions)]
@@ -144,19 +146,19 @@ def query(question: str, debug: bool = False) -> str:
   my_targeting = None
 
   for i, entity in enumerate(entities):
-    me: bool = entity.get("local") or False
-    snbt = entity.get("nbt")
+    me: bool = entity.local or False
+    snbt = entity.nbt
     nbt = lib_nbt.parse_snbt(snbt) if snbt else {}
-    name = entity["name"]
-    #name = json.loads(nbt.get("CustomName", "{}")).get("text") or entity["name"]
+    name = entity.name
+    #name = json.loads(nbt.get("CustomName", "{}")).get("text") or entity.name
     if me:
       my_name = name
-    health = entity.get("health") or "none"
+    health = entity.health or "none"
     if type(health) is float:
       health = str(health).rstrip(".0")
-    type_ = entity["type"].split(".")[-1].replace("_", " ")
-    pos = [round(p) for p in entity["position"]]
-    velocity = entity["velocity"]
+    type_ = entity.type.split(".")[-1].replace("_", " ")
+    pos = [round(p) for p in entity.position]
+    velocity = entity.velocity
     if velocity[1] < 0 and velocity[1] > -0.08:
       #echo(f'(entity["{name}"].velocity[1] = {velocity[1]} -> 0)')
       velocity[1] = 0  # ignore gravitational effect on y velocity
@@ -193,7 +195,11 @@ def query(question: str, debug: bool = False) -> str:
     if me:
       target = minescript.player_get_targeted_block(500)
       if target:
-        _, distance, face, block = target
+        # _, distance, face, block = target
+        distance = target.distance
+        face = target.side
+        block = target.type
+        
         distance = round(distance * 10) / 10
         if face == "up":
           face = "top"
@@ -210,11 +216,11 @@ def query(question: str, debug: bool = False) -> str:
   if my_name:
     context += f"me: My name is {my_name} and I'm {my_targeting}."
 
-  spawn = world_props["spawn"]
+  spawn = world_props.spawn
   weather = "clear"
-  if world_props["raining"]:
+  if world_props.raining:
     weather = "raining"
-  elif world_props["thundering"]:
+  elif world_props.thundering:
     weather = "thundering"
 
   def ticks_to_time(ticks: int) -> str:
@@ -233,7 +239,7 @@ def query(question: str, debug: bool = False) -> str:
   def time_until_sunset(ticks: int) -> str:
     return ticks_to_time((12000 - ticks) % 24000) + " until sunset"
 
-  day_ticks = world_props["day_ticks"] % 24000
+  day_ticks = world_props.day_ticks % 24000
   sun_times = f"{time_until_sunrise(day_ticks)}, {time_until_sunset(day_ticks)}"
   if day_ticks < 5000:
     day_time = f"morning"
